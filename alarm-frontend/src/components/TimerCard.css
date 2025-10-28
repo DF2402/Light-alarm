@@ -1,0 +1,111 @@
+.timer-card {
+    background-color: #f0f0f0;
+    border-radius: 20px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+    max-width: 600px;
+    margin: 20px auto;
+    color: black;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    overflow: hidden;
+    display: flex;
+}
+
+.timer-card-header {
+    padding: 30px;
+}
+.timer-card-body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 20px;
+    flex: 1;
+}
+
+.timer-inputs-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 20px;
+    margin-top: 20px;
+}
+
+.plus-btn, .minus-btn {
+    background-color: #007bff;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+.hour-column, .minute-column {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+}
+
+.hour-column input, .minute-column input {
+    text-align: center;
+    font-family: 'Inter', 'Roboto Mono', monospace;
+    font-size: 22px;
+    font-weight: 600;
+    border: none;
+    background: #f1f5f9;
+    border-radius: 8px;
+    width: 60px;
+    height: 45px;
+    margin: 8px 0;
+    font-variant-numeric: tabular-nums;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+    -moz-appearance: textfield; 
+    -webkit-appearance: none;
+    appearance: none;
+}
+
+input::-webkit-outer-spin-button,
+input::-webkit-inner-spin-button {
+  -webkit-appearance: none; /* 去掉 Chrome 的默认箭头 */
+  margin: 0;
+}
+
+.side-btn {
+    background: #28a745;
+    border-top-right-radius: 16px;
+    border-bottom-right-radius: 16px;
+    border: none;
+    font-size: 18px;
+    padding: 0 25px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: 0.3s;
+  }
+
+.side-btn:hover {
+    background: #1e7e34;
+  }
+
+@media (max-width: 480px) {
+    .timer-inputs-container {
+        flex-direction: column;
+        align-items: center;
+    }
+    .hour-column, .minute-column {
+        flex-direction: row;
+        align-items: center;
+    }
+    .side-btn {
+      border-radius: 0 0 16px 16px;
+      width: 100%;
+    }
+  }
+
+.message {
+    color: #dc3545;
+    font-weight: bold;
+}
+
