@@ -1,20 +1,30 @@
 from flask import Flask, render_template, request, jsonify
+from flask_cors import CORS
 from threading import Timer
 import datetime
-form train import extract_hog_feature 
+import cv2
+import json
+import base64
+import numpy as np
+from train import extract_hog_feature 
+
 app = Flask(__name__)
+CORS(app)  # 允許跨域請求
 
 wake_up_time_str = None  
 timer = None
 
 with open('features.json', 'r') as f:
     data = json.load(f)
-    person_features = np.array(data['person'])
-    no_person_features = np.array(data['no_person'])
+    person_features = np.array(data['on_bed'])
+    no_person_features = np.array(data['off_bed'])
+
 @app.route('/api/timer-time', methods=['GET'])
-def get_time():
+def get_timer_time():
     global wake_up_time_str
-    return jsonify({'time': wake_up_time_str})
+    if wake_up_time_str is None:
+        return jsonify({'timer_time': "No timer set"})
+    return jsonify({'timer_time': wake_up_time_str})
 
 @app.route('/api/set-timer', methods=['POST'])
 def set_time():
@@ -23,6 +33,21 @@ def set_time():
     wake_up_time_str = data.get('time')
     set_wake_time(wake_up_time_str)
     return jsonify({"status": "success"})
+
+@app.route('/api/take-image', methods=['GET'])
+def capture_image():
+    cap = cv2.VideoCapture(0)
+    if not cap.isOpened():
+        return jsonify({'status': 'error', 'message': 'Failed to open camera'})
+    ret, frame = cap.read()
+    if not ret:
+        return jsonify({'status': 'error', 'message': 'Failed to capture image'})
+    success, buffer = cv2.imencode('.jpg', frame)
+    if not success:
+        return jsonify({'status': 'error', 'message': 'Failed to encode image'})
+    image_base64 = base64.b64encode(buffer).decode('utf-8')
+    cap.release()
+    return jsonify({'status': 'success', 'message': 'Image captured successfully', 'image': image_base64})
 
 def set_wake_time(time_str):
     global wake_up_time_str, timer
@@ -41,32 +66,6 @@ def set_wake_time(time_str):
 
     timer = Timer(seconds_until, check_bed_presence)
     timer.start()
-
-
-def chi_square_distance(histA, histB):
-    eps = 1e-10
-    return 0.5 * np.sum(((histA - histB) ** 2) / (histA + histB + eps))
-
-def check_bed_presence():
-    print(f"checking (time:{wake_up_time_str})")
-    cap = cv2.VideoCapture(0)
-    ret, frame = cap.read()
-    cap.release()
-    if not ret:
-        print("fail to open camera")
-        return
-    current_feature = extract_hog_feature(frame)
-    dist_person = np.min([chi_square_distance(current_feature, feat) for feat in person_features])
-    dist_no_person = np.min([chi_square_distance(current_feature, feat) for feat in no_person_features])
-
-    threshold = 0.5
-
-    if dist_person < threshold:
-        print("find person")
-    elif dist_no_person < threshold:
-        print("no person ")
-    else:
-        print("fail to detect")
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
