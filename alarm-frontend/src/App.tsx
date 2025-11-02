@@ -2,6 +2,7 @@ import React from "react";
 import TimerCard from "./components/TimerCard";
 import ClockCard from "./components/ClockCard";
 import CameraCard from "./components/CameraCard";
+import IotCard from "./components/IotCard";
 import "./App.css";
 
 function App() {
@@ -16,6 +17,7 @@ function App() {
         <TimerCard onTimerSet={handleTimerSet} />
         <ClockCard />
         <CameraCard />
+        <IotCard />
       </div>
     </div>
   );

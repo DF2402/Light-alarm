@@ -1,0 +1,27 @@
+.iot-card {
+    background-color: #f0f0f0;
+    border-radius: 20px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+    max-width: 600px;
+    margin: 20px auto;
+    color: black;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    overflow: hidden;
+    display: flex;
+}
+
+.iot-card-header {
+    padding: 30px;
+}
+.iot-card-body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 20px;
+    flex: 1;
+}
+.iot-card-body-content {
+    max-width: 400px;
+    max-height: 400px;
+}

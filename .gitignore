@@ -51,3 +51,6 @@ alarm-frontend/dist/
 
 # 日誌
 *.log
+
+# 其他
+iot/sketch_oct29a/esp8266/esp8266.ino
