@@ -54,3 +54,6 @@ alarm-frontend/dist/
 
 # 其他
 iot/sketch_oct29a/esp8266/esp8266.ino
+
+# model
+*.pkl
