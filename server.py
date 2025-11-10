@@ -9,8 +9,8 @@ import numpy as np
 from train import extract_hog_feature 
 import asyncio
 import websockets
-from queue import Queue
 from classifier import Classifier
+from websocket_server import WebsocketServer
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
@@ -20,8 +20,7 @@ timer = None
 connected_clients = set()
 last_message = None
 light_alarm_level = 0
-
-message_queue = Queue()
+ws_server = None  # 全域 WebSocket 伺服器實例
 
 @app.route('/api/timer-time', methods=['GET'])
 def get_timer_time():
@@ -61,34 +60,36 @@ def get_last_message():
 
 @app.route('/api/set-light-alarm-level', methods=['POST'])
 def set_light_alarm_level():
-    global light_alarm_level
+    global light_alarm_level, ws_server
     data = request.get_json()
     light_alarm_level = data.get('level')
     
-    message_queue.put({
-        'type': 'light_level',
-        'value': light_alarm_level
-    })
+    # 直接透過 WebSocket 伺服器發送
+    if ws_server:
+        ws_server.send_to_client(f"LIGHT:{light_alarm_level}")
     
     print(f"Light alarm level set to: {light_alarm_level}")
     return jsonify({'status': 'success', 'message': 'Light alarm level set successfully', 'level': light_alarm_level})
 
 @app.route('/api/send-message', methods=['POST'])
 def send_message_to_esp():
-
+    global ws_server
     data = request.get_json()
     message = data.get('message')
     
     if not message:
         return jsonify({'status': 'error', 'message': 'No message provided'}), 400
     
-    message_queue.put({
-        'type': 'custom',
-        'message': message
-    })
+    # 直接透過 WebSocket 伺服器發送
+    if ws_server:
+        success = ws_server.send_to_client(message)
+        if success:
+            print(f"Sent message to ESP8266: {message}")
+            return jsonify({'status': 'success', 'message': 'Message sent'})
+        else:
+            return jsonify({'status': 'error', 'message': 'No client connected'}), 503
     
-    print(f"Queued message to ESP8266: {message}")
-    return jsonify({'status': 'success', 'message': 'Message queued for sending'})
+    return jsonify({'status': 'error', 'message': 'WebSocket server not ready'}), 503
      
 def set_wake_time(time_str):
     global wake_up_time_str, timer
@@ -129,83 +130,12 @@ def check_bed_presence():
     else:
         return False
 
-
-
-# websocket server for IOT device
-async def websocket_handler(websocket):
-    global last_message
-    print(f"Device connected: {websocket.remote_address}")
-    connected_clients.add(websocket)
-    
-    async def send_messages():
-        while True:
-            try:
-                if not message_queue.empty():
-                    msg_data = message_queue.get_nowait()
-                    
-                    if msg_data['type'] == 'light_level':
-                        message = f"light_alarm_level:{msg_data['value']}"
-                    elif msg_data['type'] == 'custom':
-                        message = msg_data['message']
-                    else:
-                        message = str(msg_data)
-                    
-                    try:
-                        await websocket.send(message)
-                        print(f"Sent to ESP8266: {message}")
-                    except Exception as e:
-                        print(f"Failed to send: {e}")
-                        message_queue.put(msg_data)
-                        break
-                
-                await asyncio.sleep(0.1)
-                
-            except Exception as e:
-                print(f"Send task error: {e}")
-                break
-    
-    async def receive_messages():
-        try:
-            async for message in websocket:
-                print(f"Received from ESP8266: {message}")
-                last_message = message
-                
-                try:
-                    reply = f"ACK:{message}"
-                    await websocket.send(reply)
-                    print(f"Sent reply: {reply}")
-                except Exception as e:
-                    print(f"Failed to reply: {e}")
-                    
-        except websockets.exceptions.ConnectionClosed:
-            print("ESP8266 disconnected")
-        except Exception as e:
-            print(f"Receive error: {e}")
-    
-    try:
-        await asyncio.gather(
-            send_messages(),
-            receive_messages()
-        )
-    except Exception as e:
-        print(f"WebSocket handler error: {e}")
-    finally:
-        connected_clients.discard(websocket)
-        print(f"Cleaned up connection from {websocket.remote_address}")
-
-async def start_websocket_server():
-    async with websockets.serve(websocket_handler, "0.0.0.0", 5501):
-        print("WebSocket server for ESP8266: ws://0.0.0.0:5501")
-        await asyncio.Future()
-
-def run_websocket_server():
-    asyncio.run(start_websocket_server())
-
 if __name__ == '__main__':
     print("start server...")
     
-    ws_thread = Thread(target=run_websocket_server, daemon=True)
-    ws_thread.start()
+    # 啟動 WebSocket 伺服器
+    ws_server = WebsocketServer()
+    ws_server.start_in_thread()
     
     print("HTTP API: http://0.0.0.0:5502")
     print("WebSocket server for ESP8266: ws://0.0.0.0:5501")
