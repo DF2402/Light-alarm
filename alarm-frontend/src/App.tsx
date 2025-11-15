@@ -4,6 +4,7 @@ import ClockCard from "./components/ClockCard";
 import CameraCard from "./components/CameraCard";
 import IotCard from "./components/IotCard";
 import "./App.css";
+import GraphCard from "./components/GraphCard";
 
 function App() {
   const handleTimerSet = (time: string) => {
@@ -18,6 +19,7 @@ function App() {
         <ClockCard />
         <CameraCard />
         <IotCard />
+        <GraphCard deviceId="alarm-clock" />
       </div>
     </div>
   );

@@ -1,26 +1,44 @@
 from flask import Flask, render_template, request, jsonify
 from flask_cors import CORS
-from threading import Timer, Thread
+from threading import Timer
 import datetime
 import cv2
-import json
 import base64
-import numpy as np
-from train import extract_hog_feature 
-import asyncio
-import websockets
 from classifier import Classifier
 from websocket_server import WebsocketServer
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.sql import func
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
+engine = create_engine('sqlite:///sensor_data.db', echo=False)
+Base = declarative_base()
+Session = sessionmaker(bind=engine)
+
+class SensorData(Base):
+    __tablename__ = 'sensor_data'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    device_id = Column(String(50), nullable=False, index=True)
+    sensor_id = Column(String(50), nullable=False, index=True)
+    value = Column(Float, nullable=False)
+    timestamp = Column(DateTime, default=datetime.datetime.utcnow, index=True)
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'device_id': self.device_id,
+            'sensor_id': self.sensor_id,
+            'value': self.value,
+            'timestamp': self.timestamp.isoformat()
+        }
+
 wake_up_time_str = None  
 timer = None
-connected_clients = set()
-last_message = None
-light_alarm_level = 0
-ws_server = None  # 全域 WebSocket 伺服器實例
+ws_server = None
 
 @app.route('/api/timer-time', methods=['GET'])
 def get_timer_time():
@@ -53,44 +71,112 @@ def capture_image():
     cap.release()
     return jsonify({'status': 'success', 'message': 'Image captured successfully', 'image': image, 'result': result})
 
-@app.route('/api/get-last-message', methods=['GET'])
-def get_last_message():
-    global last_message
-    return jsonify({'message': last_message})
-
-@app.route('/api/set-light-alarm-level', methods=['POST'])
-def set_light_alarm_level():
-    global light_alarm_level, ws_server
-    data = request.get_json()
-    light_alarm_level = data.get('level')
-    
-    # 直接透過 WebSocket 伺服器發送
-    if ws_server:
-        ws_server.send_to_client(f"LIGHT:{light_alarm_level}")
-    
-    print(f"Light alarm level set to: {light_alarm_level}")
-    return jsonify({'status': 'success', 'message': 'Light alarm level set successfully', 'level': light_alarm_level})
-
-@app.route('/api/send-message', methods=['POST'])
-def send_message_to_esp():
+@app.route('/api/devices', methods=['GET'])
+def get_device_list():
     global ws_server
-    data = request.get_json()
-    message = data.get('message')
-    
-    if not message:
-        return jsonify({'status': 'error', 'message': 'No message provided'}), 400
-    
-    # 直接透過 WebSocket 伺服器發送
     if ws_server:
-        success = ws_server.send_to_client(message)
-        if success:
-            print(f"Sent message to ESP8266: {message}")
-            return jsonify({'status': 'success', 'message': 'Message sent'})
+        device_list = ws_server.get_device_list()
+        print(f"Device list: {device_list}")
+        return jsonify({
+            'status': 'success',
+            'devices': device_list
+        })
+    return jsonify({
+        'status': 'error',
+        'message': 'Failed to get device list'
+    }), 500
+
+@app.route('/api/send_toggle/<device_id>', methods=['GET'])
+def send_led_command(device_id):
+    global ws_server
+    if ws_server:
+        try:
+            ws_server.send_led_command(device_id, 'toggle')
+            return jsonify({
+                'status': 'success',
+                'message': f'Message sent to {device_id}: toggle'
+            })
+        except Exception as e:
+            return jsonify({
+                'status': 'error',
+                'message': f'Error sending toggle command: {e}'
+            }), 500
+    else:
+        return jsonify({
+            'status': 'error',
+            'message': 'WebSocket server not running'
+        }), 500
+
+@app.route('/api/sensor-data/<device_id>', methods=['GET'])
+def get_sensor_data( device_id ):
+    global ws_server
+    if ws_server:
+        sensor_data = ws_server.get_sensor_data(device_id)
+        if sensor_data:
+            return jsonify({
+                'status': 'success',
+                'sensor_data': sensor_data
+            })
         else:
-            return jsonify({'status': 'error', 'message': 'No client connected'}), 503
+            return jsonify({
+                'status': 'error',
+                'message': f'Failed to get sensor data for device {device_id}'
+            }), 500
+    return jsonify({
+        'status': 'error',
+        'message': f'Failed to get sensor data for device {device_id}'
+    }), 500
+
+@app.route('/api/sensor-history/<device_id>', methods=['GET'])
+def get_sensor_history(device_id):
+    sensor_id = request.args.get('sensor_id')
+    limit = request.args.get('limit', 100, type=int)
+    hours = request.args.get('hours', type=int)
     
-    return jsonify({'status': 'error', 'message': 'WebSocket server not ready'}), 503
-     
+    session = Session()
+    try:
+        query = session.query(SensorData).filter(SensorData.device_id == device_id)
+        
+        if sensor_id:
+            query = query.filter(SensorData.sensor_id == sensor_id)
+        
+        if hours:
+            time_threshold = datetime.datetime.utcnow() - datetime.timedelta(hours=hours)
+            query = query.filter(SensorData.timestamp >= time_threshold)
+        
+        results = query.order_by(SensorData.timestamp.desc()).limit(limit).all()
+        
+        return jsonify({
+            'status': 'success',
+            'device_id': device_id,
+            'count': len(results),
+            'data': [record.to_dict() for record in results]
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Database error: {str(e)}'
+        }), 500
+    finally:
+        session.close()
+
+def save_sensor_data_to_db(device_id, sensor_id, value):
+    session = Session()
+    try:
+        sensor_data = SensorData(
+            device_id=device_id,
+            sensor_id=sensor_id,
+            value=float(value)
+        )
+        session.add(sensor_data)
+        session.commit()
+        print(f"save sensor data to db: {device_id} - {sensor_id}: {value}")
+    except Exception as e:
+        session.rollback()
+        print(f"save sensor data to db failed: {e}")
+    finally:
+        session.close()
+
 def set_wake_time(time_str):
     global wake_up_time_str, timer
     wake_up_time_str = time_str
@@ -111,7 +197,6 @@ def set_wake_time(time_str):
 
 
 def check_bed_presence():
-    """檢查床上是否有人的函數"""
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
         print("Failed to open camera")
@@ -126,19 +211,25 @@ def check_bed_presence():
 
     result = Classifier().classify(frame)
     if result == 'on-bed':
+        send_led_command('alarm-clock', 'on')
         return True 
     else:
+        send_led_command('alarm-clock', 'off')
         return False
 
 if __name__ == '__main__':
     print("start server...")
     
-    # 啟動 WebSocket 伺服器
-    ws_server = WebsocketServer()
+    print("initialize database...")
+    Base.metadata.create_all(engine)
+    print("database initialized")
+    
+    ws_server = WebsocketServer(on_sensor_data=save_sensor_data_to_db)
     ws_server.start_in_thread()
     
     print("HTTP API: http://0.0.0.0:5502")
-    print("WebSocket server for ESP8266: ws://0.0.0.0:5501")
+    print("WebSocket: ws://0.0.0.0:5501")
+    print("=" * 50)
     
     app.run(host='0.0.0.0', port=5502, debug=True, use_reloader=False)
     

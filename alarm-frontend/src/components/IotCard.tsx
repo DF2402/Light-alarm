@@ -3,27 +3,41 @@ import { useEffect, useState } from "react";
 import { API_URL } from "../config";
 
 const IotCard = () => {
-  const [lastMessage, setLastMessage] = useState<string | null>(null);
+  const [sensorData, setSensorData] = useState<string | null>(null);
+  const [deviceList, setDeviceList] = useState<string[]>([]);
 
-  const getLastMessage = async () => {
+
+  const getDeviceList = async () => {
     try {
-      const response = await fetch(`${API_URL}/api/get-last-message`);
+      const response = await fetch(`${API_URL}/api/devices`);
       if (response.ok) {
         const data = await response.json();
-        setLastMessage(data.message);
-      } else {
-        throw new Error("Failed to get last message");
+        setDeviceList(data.devices);
       }
     } catch (error) {
       console.error("Error:", error);
-      setLastMessage("Failed to connect to server");
+      setDeviceList([]);
+    }
+  };  
+
+  const toggleLight = async (device: string) => {
+    try {
+      const response = await fetch(`${API_URL}/api/send_toggle/${device}`);
+      if (response.ok) {
+        const data = await response.json();
+        console.log(data);
+      } else {
+        throw new Error("Failed to toggle light");
+      }
+    } catch (error) {
+      console.error("Error:", error);
     }
   };
 
   useEffect(() => {
-    getLastMessage();
+    getDeviceList();
     const interval = setInterval(() => {
-      getLastMessage();
+      getDeviceList();
     }, 1000);
     return () => clearInterval(interval);
   }, []);
@@ -31,11 +45,16 @@ const IotCard = () => {
   return (
     <div className="iot-card">
       <div className="iot-card-header">
-        <h2>IoT</h2>
+        <h2>Device List</h2>
       </div>
       <div className="iot-card-body">
         <div className="iot-card-body-content">
-          <p>{lastMessage ? lastMessage : "No message received"}</p>
+          {deviceList.map((device) => (
+            <div key={device} className="device-item">
+              {device}
+              <button className="btn" onClick={() => toggleLight(device)}>Toggle Light</button>
+            </div>
+          ))}
         </div>
       </div>
     </div>
