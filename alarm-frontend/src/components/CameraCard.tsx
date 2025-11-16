@@ -41,6 +41,11 @@ const CameraCard = () => {
           {image && (
             <img src={`data:image/jpeg;base64,${image}`} alt="Taken Image" />
           )}
+          {image && (
+        <button className="btn" onClick={removeImage}>
+          Remove Image
+        </button>
+      )}
         </div>
         <div className="message-container">
           {loading && <p>Loading...</p>}
@@ -53,11 +58,7 @@ const CameraCard = () => {
       <button className="side-btn" onClick={takeImage}>
         {loading ? "Taking..." : "Take Image"}
       </button>
-      {image && (
-        <button className="btn" onClick={removeImage}>
-          Remove Image
-        </button>
-      )}
+      
     </div>
   );
 };
