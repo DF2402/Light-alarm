@@ -5,7 +5,11 @@ import joblib
 
 class Classifier:
     def __init__(self):
-        self.svm = joblib.load('svm_model.pkl')
+        try:
+            self.svm = joblib.load('svm_model.pkl')
+        except Exception as e:
+            print(f"Error loading model: {e} model not found")
+            self.svm = None
 
     def classify(self, image):
         # convert to grayscale

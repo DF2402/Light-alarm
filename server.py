@@ -4,37 +4,15 @@ from threading import Timer
 import datetime
 import cv2
 import base64
+import time
 from classifier import Classifier
 from websocket_server import WebsocketServer
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.sql import func
+from sensor_db import SensorDB
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
-engine = create_engine('sqlite:///sensor_data.db', echo=False)
-Base = declarative_base()
-Session = sessionmaker(bind=engine)
-
-class SensorData(Base):
-    __tablename__ = 'sensor_data'
-    
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    device_id = Column(String(50), nullable=False, index=True)
-    sensor_id = Column(String(50), nullable=False, index=True)
-    value = Column(Float, nullable=False)
-    timestamp = Column(DateTime, default=datetime.datetime.utcnow, index=True)
-    
-    def to_dict(self):
-        return {
-            'id': self.id,
-            'device_id': self.device_id,
-            'sensor_id': self.sensor_id,
-            'value': self.value,
-            'timestamp': self.timestamp.isoformat()
-        }
+sensor_db = SensorDB('sensor_data.db')
 
 wake_up_time_str = None  
 timer = None
@@ -86,15 +64,16 @@ def get_device_list():
         'message': 'Failed to get device list'
     }), 500
 
+
 @app.route('/api/send_toggle/<device_id>', methods=['GET'])
-def send_led_command(device_id):
+def send_led_command(device_id, value='toggle'):
     global ws_server
     if ws_server:
         try:
-            ws_server.send_led_command(device_id, 'toggle')
+            ws_server.send_led_command(device_id, value)
             return jsonify({
                 'status': 'success',
-                'message': f'Message sent to {device_id}: toggle'
+                'message': f'Message sent to {device_id}: {value}'
             })
         except Exception as e:
             return jsonify({
@@ -127,55 +106,78 @@ def get_sensor_data( device_id ):
         'message': f'Failed to get sensor data for device {device_id}'
     }), 500
 
+
 @app.route('/api/sensor-history/<device_id>', methods=['GET'])
-def get_sensor_history(device_id):
+def get_sensor_history_hourly(device_id):
     sensor_id = request.args.get('sensor_id')
-    limit = request.args.get('limit', 100, type=int)
-    hours = request.args.get('hours', type=int)
+    hours = request.args.get('hours', 24, type=int)
     
-    session = Session()
     try:
-        query = session.query(SensorData).filter(SensorData.device_id == device_id)
+        data = sensor_db.get_hourly_average(device_id, sensor_id, hours)
         
-        if sensor_id:
-            query = query.filter(SensorData.sensor_id == sensor_id)
-        
-        if hours:
-            time_threshold = datetime.datetime.utcnow() - datetime.timedelta(hours=hours)
-            query = query.filter(SensorData.timestamp >= time_threshold)
-        
-        results = query.order_by(SensorData.timestamp.desc()).limit(limit).all()
+        simplified_data = [
+            {'timestamp': item['timestamp'], 'value': item['value']}
+            for item in data
+        ]
         
         return jsonify({
             'status': 'success',
             'device_id': device_id,
-            'count': len(results),
-            'data': [record.to_dict() for record in results]
+            'count': len(simplified_data),
+            'data': simplified_data
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Database error: {str(e)}'
+        }), 500
+
+@app.route('/api/last-detection', methods=['GET'])
+def get_last_detection():
+    try:
+        record = sensor_db.get_latest_detection()
+        if record:
+            return jsonify({
+                'status': 'success',
+                'image': record['image_data'],
+                'detection_result': record['result'],
+                'detection_time': record['timestamp']
+            })
+        else:
+            return jsonify({
+                'status': 'failed',
+                'message': 'No detection record available'
+            })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Database error: {str(e)}'
+        }), 500
+
+@app.route('/api/detection-history', methods=['GET'])
+def get_detection_history():
+    limit = request.args.get('limit', 10, type=int)
+    
+    try:
+        records = sensor_db.get_detection_history(limit)
+        return jsonify({
+            'status': 'success',
+            'count': len(records),
+            'data': records
         })
     except Exception as e:
         return jsonify({
             'status': 'error',
             'message': f'Database error: {str(e)}'
         }), 500
-    finally:
-        session.close()
 
 def save_sensor_data_to_db(device_id, sensor_id, value):
-    session = Session()
-    try:
-        sensor_data = SensorData(
-            device_id=device_id,
-            sensor_id=sensor_id,
-            value=float(value)
-        )
-        session.add(sensor_data)
-        session.commit()
-        print(f"save sensor data to db: {device_id} - {sensor_id}: {value}")
-    except Exception as e:
-        session.rollback()
-        print(f"save sensor data to db failed: {e}")
-    finally:
-        session.close()
+    success = sensor_db.insert_sensor_data(device_id, sensor_id, value)
+    if success:
+        print(f"[Server] Saved: {device_id} - {sensor_id}: {value}")
+    else:
+        print(f"[Server] Failed: {device_id} - {sensor_id}: {value}")
 
 def set_wake_time(time_str):
     global wake_up_time_str, timer
@@ -197,39 +199,47 @@ def set_wake_time(time_str):
 
 
 def check_bed_presence():
+    ws_server.send_led_command('alarm-clock', 'on')
+    time.sleep(1)
+    
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
-        print("Failed to open camera")
-        return
+        print("[Server] Failed to open camera")
+        return False
     
     ret, frame = cap.read()
     cap.release()
     
     if not ret:
-        print("Failed to read image")
+        print("[Server] Failed to read image")
         return False
 
     result = Classifier().classify(frame)
+    
+    _, buffer = cv2.imencode(".jpg", frame)
+    image_base64 = base64.b64encode(buffer).decode("utf-8")
+    
+    sensor_db.save_detection(image_base64, result)
+    print(f"[Server] Detection saved: {result}")
+    
     if result == 'on-bed':
-        send_led_command('alarm-clock', 'on')
-        return True 
+        return True
     else:
-        send_led_command('alarm-clock', 'off')
+        ws_server.send_led_command('alarm-clock', 'off')
         return False
 
 if __name__ == '__main__':
-    print("start server...")
-    
-    print("initialize database...")
-    Base.metadata.create_all(engine)
-    print("database initialized")
+    print("=" * 50)
+    print("Smart Light Alarm Server")
+    print("=" * 50)
     
     ws_server = WebsocketServer(on_sensor_data=save_sensor_data_to_db)
     ws_server.start_in_thread()
     
-    print("HTTP API: http://0.0.0.0:5502")
-    print("WebSocket: ws://0.0.0.0:5501")
-    print("=" * 50)
+    print("\nServer is running:")
+    print("  HTTP API: http://0.0.0.0:5502")
+    print("  WebSocket: ws://0.0.0.0:5501")
+    print("=" * 50 + "\n")
     
     app.run(host='0.0.0.0', port=5502, debug=True, use_reloader=False)
     

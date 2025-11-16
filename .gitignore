@@ -55,5 +55,10 @@ alarm-frontend/dist/
 # 其他
 iot/sketch_oct29a/esp8266/esp8266.ino
 
+# ESP32 配置（包含敏感信息）
+Iot/esp32alarm/config.h
+Iot/*/config.h
+
 # model
 *.pkl
+*.db
