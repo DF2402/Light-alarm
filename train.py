@@ -129,7 +129,7 @@ if __name__ == "__main__":
     if len(on_bed) == 0 and len(off_bed) == 0:
         print("\n錯誤: 沒有找到任何圖像，程序退出")
         exit(1)
-    
+
     # 提取 HOG 特徵
     print(f"\n步驟 2: 提取 HOG 特徵...")
     print(f"在床圖像: {len(on_bed)} 張")
